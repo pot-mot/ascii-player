@@ -16,6 +16,7 @@
 #include <QAudioOutput>
 #include <QDebug>
 #include <QTextDocumentFragment>
+#include <Qslider>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -246,13 +247,45 @@ void MainWindow::on_action_Open_Ascii_Video_triggered()
     int screenWidth = screenGeometry.width();
     int screenHeight = screenGeometry.height();
 
-    QMdiSubWindow *child = ui->mdiArea->addSubWindow(textEdit);
+    QWidget *widget = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(widget);
+    layout->setContentsMargins(0, 0, 0, 0);
+
+    QMdiSubWindow *child = ui->mdiArea->addSubWindow(widget);
     child->setWindowTitle(tr("ASCII 视频 - %1").arg(QFileInfo(fileName).fileName()));
+
+    // 添加文本编辑器到布局
+    layout->addWidget(textEdit);
+
+    // 创建并添加进度条到布局
+    QSlider *slider = new QSlider(Qt::Horizontal, this);
+    layout->addWidget(slider);
+
     child->show();
     child->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
+    connect(player, &QMediaPlayer::durationChanged, slider, [slider](qint64 duration) {
+        slider->setMaximum(duration);
+    });
+
+    connect(player, &QMediaPlayer::positionChanged, slider, [slider](qint64 position) {
+        slider->setValue(position);
+    });
+
+    connect(slider, &QSlider::sliderPressed, player, [player]() {
+        player->stop();
+    });
+
+    connect(slider, &QSlider::sliderMoved, player, [player](int value) {
+        player->setPosition(value);
+    });
+
+    connect(slider, &QSlider::sliderReleased, player, [player]() {
+        player->play();
+    });
+
     // 连接 QVideoSink 的 videoFrameChanged 信号
-    connect(videoSink, &QVideoSink::videoFrameChanged, this, [this, player, videoSink, textEdit, document, child, screenWidth, screenHeight](const QVideoFrame &frame) {
+    connect(videoSink, &QVideoSink::videoFrameChanged, this, [this, player, videoSink, textEdit, document, child, screenWidth, screenHeight, widget](const QVideoFrame &frame) {
         disconnect(videoSink, &QVideoSink::videoFrameChanged, this, nullptr);
         player->stop();
 
@@ -279,10 +312,11 @@ void MainWindow::on_action_Open_Ascii_Video_triggered()
         displayAscii(document, &scaledImage);
 
         QSizeF size = document->size();
-        child->resize(size.width() + 32, size.height() + 32);
+        child->resize(size.width() + 32, size.height() + 52);
 
         connect(videoSink, &QVideoSink::videoFrameChanged, this, [document, targetWidth, targetHeight](const QVideoFrame &frame) {
             QImage image = frame.toImage().scaled(targetWidth, targetHeight);
+            if (image.isNull()) return;
             displayAscii(document, &image);
         });
 
