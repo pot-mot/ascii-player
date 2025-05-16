@@ -131,13 +131,11 @@ void MainWindow::on_action_Open_triggered()
 const char* asciiChars = "@%#*+=-:. ";
 const int charLen = strlen(asciiChars);
 
-void displayAscii(QTextDocument *document, QImage *image)
+void displayAscii(QTextDocument *document, QTextCursor *cursor, QTextCharFormat *format, const QImage *image)
 {
     document->clear();
 
-    QTextCharFormat format;
-    QTextCursor cursor(document);
-    cursor.beginEditBlock();
+    cursor->beginEditBlock();
 
     for (int y = 0; y < image->height(); ++y)
     {
@@ -149,13 +147,37 @@ void displayAscii(QTextDocument *document, QImage *image)
             int index = (grayValue * (charLen - 1)) / 255;
             char asciiChar = asciiChars[index];
 
-            format.setForeground(QColor(pixel));
-            cursor.insertText(QString(asciiChar), format);
+            format->setForeground(QColor(pixel));
+            cursor->insertText(QString(asciiChar), *format);
         }
-        cursor.insertText("\n");
+        cursor->insertText("\n");
     }
 
-    cursor.endEditBlock();
+    cursor->endEditBlock();
+}
+
+void displayAsciiNoColor(QTextDocument *document, QTextCursor *cursor, const QImage *image)
+{
+    document->clear();
+
+    QString result = "";
+
+    for (int y = 0; y < image->height(); ++y)
+    {
+        for (int x = 0; x < image->width(); ++x)
+        {
+            QRgb pixel = image->pixel(x, y);
+
+            int grayValue = qGray(pixel);
+            int index = (grayValue * (charLen - 1)) / 255;
+            char asciiChar = asciiChars[index];
+
+            result.push_back(asciiChar);
+        }
+        result.push_back('\n');
+    }
+
+    cursor->insertText(result);
 }
 
 void MainWindow::on_action_Open_Ascii_Img_triggered()
@@ -205,8 +227,12 @@ void MainWindow::on_action_Open_Ascii_Img_triggered()
     textEdit->setFont(font);
     textEdit->setAcceptRichText(false);
     textEdit->setReadOnly(true);
+    textEdit->setUndoRedoEnabled(false);
 
-    displayAscii(document, &scaledImage);
+    QTextCursor cursor(document);
+    QTextCharFormat format;
+
+    displayAscii(document, &cursor, &format, &scaledImage);
 
     QMdiSubWindow *child = ui->mdiArea->addSubWindow(textEdit);
     child->setWindowTitle(tr("ASCII 图像 - %1").arg(QFileInfo(fileName).fileName()));
@@ -240,6 +266,10 @@ void MainWindow::on_action_Open_Ascii_Video_triggered()
     textEdit->setFont(font);
     textEdit->setAcceptRichText(false);
     textEdit->setReadOnly(true);
+    textEdit->setUndoRedoEnabled(false);
+
+    QTextCursor *cursor = new QTextCursor(document);
+    QTextCharFormat *format = new QTextCharFormat();
 
     // 获取屏幕尺寸
     QScreen *screen = QGuiApplication::primaryScreen();
@@ -285,7 +315,7 @@ void MainWindow::on_action_Open_Ascii_Video_triggered()
     });
 
     // 连接 QVideoSink 的 videoFrameChanged 信号
-    connect(videoSink, &QVideoSink::videoFrameChanged, this, [this, player, videoSink, textEdit, document, child, screenWidth, screenHeight, widget](const QVideoFrame &frame) {
+    connect(videoSink, &QVideoSink::videoFrameChanged, this, [this, player, videoSink, document, child, screenWidth, screenHeight, cursor, format](const QVideoFrame &frame) {
         disconnect(videoSink, &QVideoSink::videoFrameChanged, this, nullptr);
         player->stop();
 
@@ -309,16 +339,28 @@ void MainWindow::on_action_Open_Ascii_Video_triggered()
 
         QImage scaledImage = image.scaled(targetWidth, targetHeight);
 
-        displayAscii(document, &scaledImage);
+        displayAscii(document, cursor, format, &scaledImage);
+        // displayAsciiNoColor(document, cursor, &scaledImage);
 
         QSizeF size = document->size();
         child->resize(size.width() + 32, size.height() + 52);
 
-        connect(videoSink, &QVideoSink::videoFrameChanged, this, [document, targetWidth, targetHeight](const QVideoFrame &frame) {
-            QImage image = frame.toImage().scaled(targetWidth, targetHeight);
-            if (image.isNull()) return;
-            displayAscii(document, &image);
+        connect(videoSink, &QVideoSink::videoFrameChanged, this, [document, targetWidth, targetHeight, cursor, format](const QVideoFrame &frame) {
+            if (frame.isValid()) {
+                QImage image = frame.toImage();
+                if (image.isNull()) return;
+                image = image.scaled(targetWidth, targetHeight);
+                displayAscii(document, cursor, format, &image);
+            }
         });
+        // connect(videoSink, &QVideoSink::videoFrameChanged, this, [document, targetWidth, targetHeight, cursor](const QVideoFrame &frame) {
+        //     if (frame.isValid()) {
+        //         QImage image = frame.toImage();
+        //         if (image.isNull()) return;
+        //         image = image.scaled(targetWidth, targetHeight);
+        //         displayAsciiNoColor(document, cursor, &image);
+        //     }
+        // });
 
         player->play();
     });
@@ -329,14 +371,14 @@ void MainWindow::on_action_Open_Ascii_Video_triggered()
     player->play();
 
     connect(child, &QMdiSubWindow::destroyed, this, [player, videoSink, this]() {
-        disconnect(videoSink, &QVideoSink::videoFrameChanged, this, nullptr);
         player->stop();
+        disconnect(videoSink, &QVideoSink::videoFrameChanged, this, nullptr);
         player->deleteLater();
     });
 
     connect(this, &QMainWindow::destroyed, this, [player, videoSink, this]() {
-        disconnect(videoSink, &QVideoSink::videoFrameChanged, this, nullptr);
         player->stop();
+        disconnect(videoSink, &QVideoSink::videoFrameChanged, this, nullptr);
         player->deleteLater();
     });
 }
